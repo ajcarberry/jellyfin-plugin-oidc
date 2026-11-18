@@ -862,7 +862,7 @@ public class OidcControllerTests
     {
         var result = (string)_buildCsrfCookieName.Invoke(null, ["abc123"])!;
 
-        Assert.Equal("oidc_csrf.abc123", result);
+        Assert.Equal("__Host-oidc_csrf.abc123", result);
     }
 
     // ── VerifyCsrfToken ────────────────────────────────────────────────────────

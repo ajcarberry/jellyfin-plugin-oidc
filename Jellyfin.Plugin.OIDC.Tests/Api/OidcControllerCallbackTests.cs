@@ -381,7 +381,7 @@ public class OidcControllerCallbackTests
             QuickConnect = quickConnect,
         })!;
 
-        controller.HttpContext.Request.Headers["Cookie"] = $"oidc_csrf.{stateKey}={csrfCookie ?? CsrfToken}";
+        controller.HttpContext.Request.Headers["Cookie"] = $"__Host-oidc_csrf.{stateKey}={csrfCookie ?? CsrfToken}";
         return stateKey;
     }
 

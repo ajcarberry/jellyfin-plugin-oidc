@@ -132,9 +132,9 @@ public class OidcController : ControllerBase
             new CookieOptions
             {
                 HttpOnly = true,
-                Secure = Request.IsHttps,
+                Secure = true,
                 SameSite = SameSiteMode.Lax,
-                Path = "/sso/OIDC",
+                Path = "/",
                 MaxAge = StateManager.StateExpiry
             });
 
@@ -173,7 +173,7 @@ public class OidcController : ControllerBase
 
         var csrfCookieName = BuildCsrfCookieName(state);
         Request.Cookies.TryGetValue(csrfCookieName, out var csrfCookie);
-        Response.Cookies.Delete(csrfCookieName, new CookieOptions { Path = "/sso/OIDC" });
+        Response.Cookies.Delete(csrfCookieName, new CookieOptions { Path = "/", Secure = true });
 
         if (!VerifyCsrfToken(csrfCookie, oidcState.CsrfToken))
         {
@@ -702,7 +702,7 @@ public class OidcController : ControllerBase
         }
     }
 
-    private static string BuildCsrfCookieName(string stateKey) => $"oidc_csrf.{stateKey}";
+    private static string BuildCsrfCookieName(string stateKey) => $"__Host-oidc_csrf.{stateKey}";
 
     private static bool VerifyCsrfToken(string? cookieValue, string expectedToken) =>
         !string.IsNullOrEmpty(cookieValue) &&
