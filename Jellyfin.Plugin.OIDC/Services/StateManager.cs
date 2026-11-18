@@ -20,6 +20,9 @@ public sealed class OidcState
     /// When true, the callback drives Quick Connect instead of a web-client localStorage login.
     public bool QuickConnect { get; init; }
 
+    /// Which login-CSRF cookie /Start issued (see <see cref="CsrfCookiePolicy"/>); the callback reads only that one.
+    public bool StrictCsrfCookie { get; init; } = true;
+
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 

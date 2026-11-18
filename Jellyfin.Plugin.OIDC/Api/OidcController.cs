@@ -4,6 +4,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Duende.IdentityModel;
 using Duende.IdentityModel.Client;
@@ -109,6 +110,11 @@ public class OidcController : ControllerBase
         var nonce = CryptoRandom.CreateUniqueId(32);
         var csrfToken = CryptoRandom.CreateUniqueId(32);
         var redirectUri = BuildRedirectUri(provider);
+        var strictCsrfCookie = CsrfCookiePolicy.UseStrict(OidcPlugin.CurrentConfig.ServerBaseUrl, Request.IsHttps);
+        if (!strictCsrfCookie)
+        {
+            WarnCompatibleCsrfCookieOnce();
+        }
 
         var state = new OidcState
         {
@@ -117,7 +123,8 @@ public class OidcController : ControllerBase
             CodeVerifier = codeVerifier,
             RedirectUri = redirectUri,
             CsrfToken = csrfToken,
-            QuickConnect = quickConnect
+            QuickConnect = quickConnect,
+            StrictCsrfCookie = strictCsrfCookie
         };
 
         var stateKey = _stateManager.StoreState(state);
@@ -127,16 +134,9 @@ public class OidcController : ControllerBase
         }
 
         Response.Cookies.Append(
-            BuildCsrfCookieName(stateKey),
+            CsrfCookiePolicy.CookieName(stateKey, strictCsrfCookie),
             csrfToken,
-            new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = true,
-                SameSite = SameSiteMode.Lax,
-                Path = "/",
-                MaxAge = StateManager.StateExpiry
-            });
+            CsrfCookiePolicy.IssueOptions(strictCsrfCookie, Request.IsHttps, StateManager.StateExpiry));
 
         var authorizeUrl = new RequestUrl(disco.AuthorizeEndpoint!);
         var url = authorizeUrl.CreateAuthorizeUrl(
@@ -171,9 +171,9 @@ public class OidcController : ControllerBase
             return BadRequest("Invalid or expired authentication state. Please try again.");
         }
 
-        var csrfCookieName = BuildCsrfCookieName(state);
+        var csrfCookieName = CsrfCookiePolicy.CookieName(state, oidcState.StrictCsrfCookie);
         Request.Cookies.TryGetValue(csrfCookieName, out var csrfCookie);
-        Response.Cookies.Delete(csrfCookieName, new CookieOptions { Path = "/", Secure = true });
+        Response.Cookies.Delete(csrfCookieName, CsrfCookiePolicy.DeleteOptions(oidcState.StrictCsrfCookie));
 
         if (!VerifyCsrfToken(csrfCookie, oidcState.CsrfToken))
         {
@@ -702,7 +702,18 @@ public class OidcController : ControllerBase
         }
     }
 
-    private static string BuildCsrfCookieName(string stateKey) => $"__Host-oidc_csrf.{stateKey}";
+    private static int _compatibleCsrfCookieWarned;
+
+    private void WarnCompatibleCsrfCookieOnce()
+    {
+        if (Interlocked.Exchange(ref _compatibleCsrfCookieWarned, 1) == 0)
+        {
+            _logger.LogWarning(
+                "OIDC: sign-in is running over plain HTTP, so the login-CSRF cookie cannot use the __Host- prefix; "
+                + "a page on a sibling subdomain could plant it and sign a user into another account. "
+                + "Serve Jellyfin over HTTPS and set ServerBaseUrl to its https:// address.");
+        }
+    }
 
     private static bool VerifyCsrfToken(string? cookieValue, string expectedToken) =>
         !string.IsNullOrEmpty(cookieValue) &&

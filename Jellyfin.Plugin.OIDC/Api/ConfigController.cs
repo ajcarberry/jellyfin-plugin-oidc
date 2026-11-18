@@ -78,7 +78,8 @@ public class ConfigController : ControllerBase
             ProviderCount = config.Providers.Count,
             RoleMappingCount = config.RoleMappings.Count,
             IdentityMapCount = _mapStore.Count,
-            EnabledProviders = config.Providers.Where(p => p.Enabled).Select(p => p.DisplayName).ToList()
+            EnabledProviders = config.Providers.Where(p => p.Enabled).Select(p => p.DisplayName).ToList(),
+            CsrfCookieMode = CsrfCookiePolicy.UseStrict(config.ServerBaseUrl, Request.IsHttps) ? "strict" : "compatible"
         });
     }
 

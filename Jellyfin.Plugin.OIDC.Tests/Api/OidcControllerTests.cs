@@ -365,6 +365,66 @@ public class OidcControllerTests
         Assert.IsType<RedirectResult>(result);
     }
 
+    // ── Start: login-CSRF cookie mode (CsrfCookiePolicy) ──────────────────────
+
+    private async Task<string> StartAndGetSetCookieAsync(string serverBaseUrl)
+    {
+        const string authority = "https://203.0.113.10";
+        var discoveryJson = $$"""
+            {
+                "issuer": "{{authority}}",
+                "authorization_endpoint": "{{authority}}/authorize",
+                "token_endpoint": "{{authority}}/token",
+                "jwks_uri": "{{authority}}/jwks"
+            }
+            """;
+        _fixture.SetConfiguration(new PluginConfiguration
+        {
+            ServerBaseUrl = serverBaseUrl,
+            Providers =
+            [
+                new OidcProviderConfig { ProviderId = "keycloak", Authority = authority, ClientId = "client", Enabled = true }
+            ]
+        });
+        var controller = MakeController(httpHandler: new MockHttpMessageHandler(HttpStatusCode.OK, discoveryJson));
+
+        var result = await controller.Start("keycloak");
+
+        Assert.IsType<RedirectResult>(result);
+        return controller.HttpContext.Response.Headers.SetCookie.ToString();
+    }
+
+    [Fact]
+    public async Task Start_HttpsServerBaseUrl_IssuesHostPrefixedCookieEvenWhenRequestLooksHttp()
+    {
+        // Behind a TLS-terminating proxy without KnownProxies, Request.IsHttps is false.
+        var setCookie = await StartAndGetSetCookieAsync("https://jellyfin.example");
+
+        Assert.StartsWith("__Host-oidc_csrf.", setCookie);
+        Assert.Contains("path=/;", setCookie);
+        Assert.Contains("secure", setCookie);
+        Assert.Contains("httponly", setCookie);
+        Assert.DoesNotContain("domain=", setCookie);
+    }
+
+    [Fact]
+    public async Task Start_HttpServerBaseUrl_IssuesCompatibleCookie()
+    {
+        var setCookie = await StartAndGetSetCookieAsync("http://jellyfin.lan:8096");
+
+        Assert.StartsWith("oidc_csrf.", setCookie);
+        Assert.Contains("path=/sso/OIDC", setCookie);
+        Assert.DoesNotContain("secure", setCookie);
+    }
+
+    [Fact]
+    public async Task Start_NoServerBaseUrlAndPlainHttpRequest_IssuesCompatibleCookie()
+    {
+        var setCookie = await StartAndGetSetCookieAsync(string.Empty);
+
+        Assert.StartsWith("oidc_csrf.", setCookie);
+    }
+
     // ── ValidateOrPinEndpoints (TOFU pinning of discovery endpoints) ───────────
     // Uses a real DiscoveryDocumentResponse from a mocked HTTP handler, not a hand-built stand-in.
 
@@ -848,21 +908,6 @@ public class OidcControllerTests
         var values = ((IEnumerable<KeyValuePair<string, string>>)result!)
             .Where(p => p.Key == "resource").Select(p => p.Value).ToList();
         Assert.Equal(["a", "b"], values);
-    }
-
-    // ── BuildCsrfCookieName ────────────────────────────────────────────────────
-
-    private static readonly MethodInfo _buildCsrfCookieName =
-        typeof(OidcController).GetMethod(
-            "BuildCsrfCookieName",
-            BindingFlags.NonPublic | BindingFlags.Static)!;
-
-    [Fact]
-    public void BuildCsrfCookieName_ReturnsPrefixedStateKey()
-    {
-        var result = (string)_buildCsrfCookieName.Invoke(null, ["abc123"])!;
-
-        Assert.Equal("__Host-oidc_csrf.abc123", result);
     }
 
     // ── VerifyCsrfToken ────────────────────────────────────────────────────────

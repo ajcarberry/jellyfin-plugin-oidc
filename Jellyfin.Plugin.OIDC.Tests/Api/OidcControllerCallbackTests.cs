@@ -193,6 +193,53 @@ public class OidcControllerCallbackTests
     }
 
     [Fact]
+    public async Task Callback_StrictState_RejectsCompatibleCookieName()
+    {
+        // A sibling subdomain can plant the non-prefixed name; a strict flow must never accept it.
+        var (controller, stateManager) = Build(RoutingHttpMessageHandler.ForFlow(
+            () => "{}", () => "{}", () => "{}"), Provider());
+        var stateKey = Seed(controller, stateManager, quickConnect: false, strictState: true, cookiePrefix: "oidc_csrf.");
+
+        var result = await controller.Callback(ProviderId, "auth-code", stateKey);
+
+        var bad = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(
+            "Could not verify this browser started the sign-in. Please retry from the same browser/tab.",
+            bad.Value);
+    }
+
+    [Fact]
+    public async Task Callback_CompatibleState_AcceptsCompatibleCookieAndMintsSession()
+    {
+        var key = OidcTestTokens.CreateSigningKey();
+        var idToken = OidcTestTokens.IdToken(key, Authority, ClientId, Nonce, groups: ["staff"]);
+        var handler = RoutingHttpMessageHandler.ForFlow(
+            discovery: () => OidcTestTokens.DiscoveryJson(Authority),
+            token: () => OidcTestTokens.TokenResponseJson(idToken),
+            jwks: () => OidcTestTokens.JwksJson(key));
+
+        var (controller, stateManager) = Build(handler, Provider());
+        var stateKey = Seed(controller, stateManager, quickConnect: false, strictState: false, cookiePrefix: "oidc_csrf.");
+
+        var result = await controller.Callback(ProviderId, "auth-code", stateKey);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(stateManager.PeekAuthorizedSession(ExtractToken(content.Content!)));
+    }
+
+    [Fact]
+    public async Task Callback_CompatibleState_RejectsHostPrefixedCookieName()
+    {
+        var (controller, stateManager) = Build(RoutingHttpMessageHandler.ForFlow(
+            () => "{}", () => "{}", () => "{}"), Provider());
+        var stateKey = Seed(controller, stateManager, quickConnect: false, strictState: false);
+
+        var result = await controller.Callback(ProviderId, "auth-code", stateKey);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
     public async Task Callback_NonceMismatch_ReturnsBadRequest()
     {
         var key = OidcTestTokens.CreateSigningKey();
@@ -369,7 +416,8 @@ public class OidcControllerCallbackTests
     }
 
     private static string Seed(
-        OidcController controller, StateManager stateManager, bool quickConnect, string? csrfCookie = null)
+        OidcController controller, StateManager stateManager, bool quickConnect, string? csrfCookie = null,
+        bool strictState = true, string cookiePrefix = "__Host-oidc_csrf.")
     {
         var stateKey = stateManager.StoreState(new OidcState
         {
@@ -379,9 +427,10 @@ public class OidcControllerCallbackTests
             RedirectUri = $"{Authority}/sso/OIDC/Callback/{ProviderId}",
             CsrfToken = CsrfToken,
             QuickConnect = quickConnect,
+            StrictCsrfCookie = strictState,
         })!;
 
-        controller.HttpContext.Request.Headers["Cookie"] = $"__Host-oidc_csrf.{stateKey}={csrfCookie ?? CsrfToken}";
+        controller.HttpContext.Request.Headers["Cookie"] = $"{cookiePrefix}{stateKey}={csrfCookie ?? CsrfToken}";
         return stateKey;
     }
 
